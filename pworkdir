@@ -159,9 +159,12 @@ function workdirs_list_all()
 
     (flock 10
         local i
+        local list_code=1
         ls "$basedir/$workname$wsep"*.info 2>/dev/null | while read -r i; do
             echo "$basedir/$(basename "$i" .info)"
-        done || exit 1
+            list_code=0
+        done || true
+        exit $list_code
     ) 10>"$(get_basedir_lock "$basedir")" || return $?
 }
 
@@ -246,10 +249,10 @@ function workdir_try_alloc()
         
         used_space="$(cat "$basedir/$workname$wsep"*.info 2>/dev/null | awk '{sum+=$6} END{print sum}' FS=, || true)"
         [ -n "$used_space" ] || used_space=0
-        if [ "$((used_space + space))" -ge "$available_space" ]; then
-            cause="workdirs space limit reached (used=$(print_kb "$used_space"), requested=$(print_kb "$space"), available=$(print_kb "$available_space"), basedir=$basedir)"
+        if [ "$((used_space + space))" -gt "$available_space" ]; then
+            cause="workdirs space limit reached (used=$(print_kb "$used_space"), requested=$(print_kb "$space"), available=$(print_kb "$available_space"))"
         else
-            cause="workdirs number limit reached (limit=$limit, basedir=$basedir)"
+            cause="workdirs number limit reached (limit=$limit)"
             for i in $(seq 1 "$limit"); do
                 candidate="$basedir/$workname$wsep$i"
                 [ -e "$candidate".info ] || workdir="$candidate"
@@ -293,10 +296,10 @@ function workdir_alloc()
                 local delay
                 delay=$(($(date +%s) - start))
                 [ "$g_timeout" -gt 0 -a "$delay" -gt "$g_timeout" ] && \
-                    error "could not allocate workdir after $delay secs (timeout=$g_timeout, limit=$g_workdirs_limit, basedir=$basedir): $cause" || true
+                    error "could not allocate workdir after $delay secs (timeout=$g_timeout, basedir=$basedir): $cause" || true
                 interval=$(($(date +%s) - last))
                 [ "$interval" -gt "$g_message_interval" ] && \
-                    info "blocked, waiting for a free workdir since $delay secs (timeout=$g_timeout): $cause" && \
+                    info "blocked, waiting for a free workdir since $delay secs (timeout=$g_timeout, basedir=$basedir): $cause" && \
                     last="$(date +%s)" || true
                 workdirs_clean_all_free "$g_basedir" "$g_workname" "$g_wsep" || \
                     sleep 1
@@ -326,10 +329,12 @@ function workdirs_clean_all_free()
     basedir="$(get_basedir "$basedir")"
     local trashdir="$(mktemp -d -p "$basedir" tmp.trash.XXXXXX)"
 
+    debug "cleaning free workdirs in: $basedir"
     (flock 10
         local i
         local status
         local workdir
+        local clean_code=1
         ls "$basedir/$workname$wsep"*.info 2>/dev/null | while read -r i; do
             info="$(cat "$i" 2>/dev/null || true)"
             status="$(workdir_info_status "$info")"
@@ -338,7 +343,9 @@ function workdirs_clean_all_free()
             debug "cleaning free workdir: $workdir"
             mv "$workdir" "$trashdir"/ 2>/dev/null || true
             rm -f "$i"
-        done || exit $?
+            clean_code=0
+        done || true
+        exit $clean_code
     ) 10>"$(get_basedir_lock "$basedir")" || return $?
 
     chmod -R +rwX "$basedir"/tmp.trash.* 2>/dev/null || true

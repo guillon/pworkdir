@@ -21,13 +21,11 @@ source `dirname $0`/common.sh
 
 TEST_CASE="pworkdir: parallel creation of workdirs with absolute space constraint"
 
-(set +x
-    env PWORKDIR="$PWORKDIR" parallel -j 20 -u 'echo {}: allocated: $("$PWORKDIR" --pid '$$' -t 5 -n 20 --workdirs-space-limit 1G --space 200M --message-interval 1 alloc || echo failed)' ::: $(seq 1 20)
-    ) 2>&1 | tee -a log
+env env SHELL="$(which bash)" PWORKDIR="$PWORKDIR" parallel -j 20 -u 'echo {}: allocated: $("$PWORKDIR" --pid '$$' -t 5 -n 20 --workdirs-space-limit 1G --space 200M --message-interval 1 alloc || echo failed)' ::: $(seq 1 20) 2>&1 | tee -a log
 
-count=$(grep -c ": allocated:" log || true)
+count=$(grep ": allocated:" log | grep -v '^+' | wc -l || true)
 [ "$count" = 20 ]
-count=$(grep -c ": allocated: failed" log || true)
+count=$(grep ": allocated: failed" log | grep -v '^+' | wc -l || true)
 [ "$count" = 15 ]
-count=$(grep -c "waiting for a free" log || true)
+count=$(grep "waiting for a free" log | grep -v '^+' | wc -l || true)
 [ "$count" -ge 1 ]

@@ -30,11 +30,11 @@ done 2>&1 | tee -a log
 
 "$PWORKDIR" list-all | xargs "$PWORKDIR" info
 
-count=$(grep -c ": allocated:" log || true)
+count=$(grep ": allocated:" log | grep -v '^+' | wc -l || true)
 [ "$count" = 6 ]
-count=$(grep -c "could not allocate " log || true)
+count=$(grep "could not allocate " log | grep -v '^+' | wc -l || true)
 [ "$count" = 1 ]
-count=$(grep -c "waiting for a free" log || true)
+count=$(grep "waiting for a free" log | grep -v '^+' | wc -l || true)
 [ "$count" -ge 1 ]
 
 

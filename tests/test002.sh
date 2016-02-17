@@ -22,14 +22,12 @@ source `dirname $0`/common.sh
 TEST_CASE="pworkdir: parallel creation of workdirs"
 
 rm -rf workdir-*
-(set +x
-    env SHELL="$(which bash)" PWORKDIR="$PWORKDIR" parallel -j 60 -u 'echo {}: allocated: $("$PWORKDIR" --pid '$$' -t 5 -n 6 -s 0 --message-interval 1 alloc || echo failed)' ::: $(seq 1 60)
-    ) 2>&1 | tee -a log
+env SHELL="$(which bash)" PWORKDIR="$PWORKDIR" parallel -j 60 -u 'echo {}: allocated: $("$PWORKDIR" --pid '$$' -t 5 -n 6 -s 0 --message-interval 1 alloc || echo failed)' ::: $(seq 1 60) 2>&1 | tee -a log
 
-count=$(grep -c ": allocated:" log || true)
+count=$(grep ": allocated:" log | grep -v '^+' | wc -l || true)
 [ "$count" = 60 ]
-count=$(grep -c ": allocated: failed" log || true)
+count=$(grep ": allocated: failed" log | grep -v '^+' | wc -l || true)
 [ "$count" = 54 ]
-count=$(grep -c "waiting for a free" log || true)
+count=$(grep "waiting for a free" log | grep -v '^+' | wc -l || true)
 [ "$count" -ge 1 ]
 

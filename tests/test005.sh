@@ -23,8 +23,8 @@ TEST_CASE="pworkdir: parallel creation of workdirs with execution"
 
 env SHELL="$(which bash)" PWORKDIR="$PWORKDIR" parallel -j 20 -u 'echo {}: running: $("$PWORKDIR" --space 0 -n 5 --message-interval 1 exec sleep 2 && echo DONE || true)' ::: $(seq 1 20) 2>&1 | tee -a log
 
-count=$(grep -c ": running: DONE" log || true)
+count=$(grep ": running: DONE" log | grep -v '^+' | wc -l || true)
 [ "$count" = 20 ]
-count=$(grep -c "waiting for a free" log || true)
+count=$(grep "waiting for a free" log | grep -v '^+' | wc -l || true)
 [ "$count" -ge 1 ]
 
