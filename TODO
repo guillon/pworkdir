@@ -1,0 +1,6 @@
+
+# TODO list for pworkdir
+
+- complete testing for covering more options/use cases
+- may add expected duration information
+- optionally reimplement in python if getting bigger

@@ -1,0 +1,498 @@
+#!/usr/bin/env bash
+#
+# Copyright (c) STMicroelectronics 2016
+#
+# This file is part of pworkdir.
+#
+# pworkdir is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License v2.0
+# as published by the Free Software Foundation
+#
+# pworkdir is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# v2.0 along with pworkdir. If not, see <http://www.gnu.org/licenses/>.
+#
+
+set -euo pipefail
+
+VERSION="0.1.0"
+
+g_basename="$(basename "$0")"
+g_dirname="$(dirname "$0")"
+
+function help() {
+    cat <<EOF
+usage: $g_basename exec <cmd...>
+    or $g_basename alloc
+       $g_basename free <workdirs>...
+    or $g_basename status|info <workdirs>...
+    or $g_basename list-all|clean-all
+
+In the first form, allocates a working directory given the constraints,
+exports the allocated pathname in the WORKDIR env. var. and executes
+the given <cmd ...>.
+
+In the second form, with alloc command, allocates the workdir and
+outputs the pathname to stdout. With free command, free and clean the
+previously allocated workdir.
+
+The other forms can be used to get status and information on previously
+allocated workdirs.
+
+EOF
+}
+
+function version() {
+    local sha1="$(sha1sum "$0" | cut -f1 -d' ' || true)"
+    echo "$g_basename version $VERSION [sha1:$sha1]"
+}
+
+function error() { echo "ERROR: $g_basename: $1" >&2; exit 1; }
+function warning() { echo "WARNING: $g_basename: $1" >&2; }
+function debug() { [ "$g_debug" = true ] || return 0; echo "DEBUG: $g_basename: $1" >&2; }
+function info() { echo "INFO: $g_basename: $1" >&2; }
+
+function get_int()
+{
+    local int="${1?}"
+    local garbage
+    garbage="$(echo "$int" | sed 's/^[0-9][0-9]*//')"
+    [ -z "$garbage" ] || return 0
+    echo "$int"
+}
+
+function get_var()
+{
+    local var="${1?}"
+    local garbage
+    garbage="$(echo "$var" | sed 's/^[_a-zA-Z][_0-9a-zA-Z]*//')"
+    [ -z "$garbage" ] || return 0
+    echo "$var"
+}
+
+function get_kb()
+{
+    local size="${1?}"
+    case "$size" in
+        *K) size="${size%%K}"
+            ;;
+        *M) size="$((${size%%M} * 1024))"
+            ;;
+        *G) size="$((${size%%G} * 1024 * 1024))"
+            ;;
+    esac
+    echo "$(get_int "$size")"
+}
+
+function print_kb()
+{
+    local size="${1?}"
+    size="$(get_kb "$size")"
+    [ -n "$size" ] || return 0
+    [ "$size" -le 10000 ] && echo "${size}K" && return 0 || true
+    [ "$size" -le 10000000 ] && echo "$((size / 1024))M" && return 0 || true
+    echo "$((size / 1024 / 1024))G"
+}
+
+function get_ratio()
+{
+    local ratio="${1?}"
+    case "$ratio" in
+        *%) ratio="${ratio%%%}"
+            ;;
+    esac
+    echo "$(get_int "$ratio")"
+}
+
+function get_basedir()
+{
+    local basedir="${1?}"
+    mkdir -p "$basedir" || error "can't create base dir: $basedir"
+    chmod 700 "$basedir" || error "can't chmod base dir: $basedir"
+    echo "$(readlink -e "$basedir")"
+}
+
+function get_basedir_lock()
+{
+    local basedir="${1?}"
+    echo "$(get_basedir "$basedir")/pworkdir.lock"
+}
+
+function workdir_clean()
+{
+    local workdir="${1?}"
+    local basedir="$(dirname "$workdir")"
+    local trashdir="$(mktemp -d -p "$basedir" tmp.trash.XXXXXX)"
+
+    debug "cleaning workdir: $workdir"
+
+    mv "$workdir" "$trashdir"/ 2>/dev/null || true
+
+    chmod -R +rwX "$basedir"/tmp.trash.* 2>/dev/null || true
+    rm -rf "$basedir"/tmp.trash.* 2>/dev/null || true
+}
+
+function workdir_clean_and_free()
+{
+    local workdir="${1?}"
+    local basedir="$(dirname "$workdir")"
+
+    debug "freing workdir: $workdir"
+
+    workdir_clean "$workdir"
+
+    (flock 10
+        rm -f "$workdir".info
+    ) 10>"$(get_basedir_lock "$basedir")"
+}
+
+function workdirs_list_all()
+{
+    local basedir="${1?}"
+    local workname="${2?}"
+    local wsep="${3?}"
+    basedir="$(get_basedir "$basedir")"
+
+    (flock 10
+        local i
+        ls "$basedir/$workname$wsep"*.info 2>/dev/null | while read -r i; do
+            echo "$basedir/$(basename "$i" .info)"
+        done || exit 1
+    ) 10>"$(get_basedir_lock "$basedir")" || return $?
+}
+
+function workdir_info()
+{
+    local workdir="${1?}"
+    local basedir="$(dirname "$workdir")"
+    basedir="$(get_basedir "$basedir")"
+
+    (flock 10
+        cat "$workdir".info 2>/dev/null || true
+    ) 10>"$(get_basedir_lock "$basedir")"
+}
+
+function workdir_info_status()
+{
+    local info="${1?}"
+    local host
+    local user
+    local pid
+    host="$(echo "$info" |cut -f2 -d,)"
+    user="$(echo "$info" |cut -f3 -d,)"
+    pid="$(echo "$info" |cut -f4 -d,)"
+    [ -z "$info" -o -z "$host" -o -z "$user" -o -z "$pid" ] && \
+        echo "FREE" && return 0 || true
+    [ "$host" != "$g_hostname" -o "$user" != "$g_user" ] && \
+        echo "UNKN" && return 0 || true
+    kill -0 "$pid" 2>/dev/null && \
+        echo "USED" && return 0 || true
+    echo "FREE"
+}
+
+function workdir_status()
+{
+    local workdir="${1?}"
+    local basedir="$(dirname "$workdir")"
+    basedir="$(get_basedir "$basedir")"
+
+    (flock 10
+        local info
+        info="$(cat "$workdir".info 2>/dev/null || true)"
+        workdir_info_status "$info"
+    ) 10>"$(get_basedir_lock "$basedir")"
+}
+
+function basedir_space()
+{
+    local basedir="${1?}"
+    if [ "$g_workdirs_space_limit" -gt 0 ]; then
+        echo "$g_workdirs_space_limit"
+    else
+        local space="$(df -k "$basedir" | tail -1 | tr '\t' ' ' | sed 's/  */,/g' | cut -f2 -d, || true)"
+        [ -n "$space" ] || error "can't determine disk size for $basedir"
+        [ "$g_workdirs_space_ratio" -le 0 ] || space="$((space * g_workdirs_space_ratio / 100))"
+        echo "$space"
+    fi
+}
+
+function workdir_try_alloc()
+{
+    local basedir="${1?}"
+    local workname="${2?}"
+    local wsep="${3?}"
+    local id="${4?}"
+    local hostname="${5?}"
+    local user="${6?}"
+    local pid="${7?}"
+    local space="${8?}"
+    local limit="${9?}"
+    basedir="$(get_basedir "$basedir")"
+
+    debug "trying workdir allocation in: $basedir"
+
+    local available_space
+    available_space="$(basedir_space "$basedir")"
+
+    (flock 10
+        local workdir=""
+        local used_space
+        local cause
+        local i
+        
+        used_space="$(cat "$basedir/$workname$wsep"*.info 2>/dev/null | awk '{sum+=$6} END{print sum}' FS=, || true)"
+        [ -n "$used_space" ] || used_space=0
+        if [ "$((used_space + space))" -ge "$available_space" ]; then
+            cause="workdirs space limit reached (used=$(print_kb "$used_space"), requested=$(print_kb "$space"), available=$(print_kb "$available_space"), basedir=$basedir)"
+        else
+            cause="workdirs number limit reached (limit=$limit, basedir=$basedir)"
+            for i in $(seq 1 "$limit"); do
+                candidate="$basedir/$workname$wsep$i"
+                [ -e "$candidate".info ] || workdir="$candidate"
+                [ -z "$workdir" ] || break
+            done
+        fi
+        if [ -z "$workdir" ]; then
+            echo "RETRY:$cause"
+            exit 1
+        else
+            local start="$(date +%s)"
+            echo "$id,$hostname,$user,$pid,$start,$space" >"$workdir".info
+            echo "$workdir"
+        fi
+    ) 10>"$(get_basedir_lock "$basedir")" || \
+        return $?
+}
+    
+function workdir_alloc()
+{
+    local start
+    local last
+    local res
+    local workdir
+    local basedir
+    basedir="$(get_basedir "$g_basedir")"
+    start="$(date +%s)"
+    last="$start"
+    while true; do
+        res=0
+        workdir="$(workdir_try_alloc "$g_basedir" "$g_workname" "$g_wsep" "$g_id" "$g_hostname" "$g_user" "$g_pid" "$g_space" "$g_workdirs_limit")" || res=$?
+        if [ $res = 0 ]; then
+            break
+        else
+            local error
+            local cause
+            error="$(echo "$workdir" | cut -f1 -d:)"
+            cause="$(echo "$workdir" | cut -f2- -d:)"
+            if [ "$error" = "RETRY" ]; then
+                local interval
+                local delay
+                delay=$(($(date +%s) - start))
+                [ "$g_timeout" -gt 0 -a "$delay" -gt "$g_timeout" ] && \
+                    error "could not allocate workdir after $delay secs (timeout=$g_timeout, limit=$g_workdirs_limit, basedir=$basedir): $cause" || true
+                interval=$(($(date +%s) - last))
+                [ "$interval" -gt "$g_message_interval" ] && \
+                    info "blocked, waiting for a free workdir since $delay secs (timeout=$g_timeout): $cause" && \
+                    last="$(date +%s)" || true
+                workdirs_clean_all_free "$g_basedir" "$g_workname" "$g_wsep" || \
+                    sleep 1
+                continue
+            else
+                error "could not allocate workdir: internal error (timeout=$g_timeout, limit=$g_workdirs_limit, basedir=$basedir)"
+            fi
+        fi
+    done
+
+    debug "allocated workdir: $workdir"
+
+    # Clean and create workdir
+    workdir_clean "$workdir"
+    mkdir -p "$workdir"
+    chmod 700 "$workdir"
+    
+    # Return new workdir
+    echo "$workdir"
+}
+
+function workdirs_clean_all_free()
+{
+    local basedir="${1?}"
+    local workname="${2?}"
+    local wsep="${3?}"
+    basedir="$(get_basedir "$basedir")"
+    local trashdir="$(mktemp -d -p "$basedir" tmp.trash.XXXXXX)"
+
+    (flock 10
+        local i
+        local status
+        local workdir
+        ls "$basedir/$workname$wsep"*.info 2>/dev/null | while read -r i; do
+            info="$(cat "$i" 2>/dev/null || true)"
+            status="$(workdir_info_status "$info")"
+            [ "$status" = "FREE" ] || continue
+            workdir="$basedir/$(basename "$i" .info)"
+            debug "cleaning free workdir: $workdir"
+            mv "$workdir" "$trashdir"/ 2>/dev/null || true
+            rm -f "$i"
+        done || exit $?
+    ) 10>"$(get_basedir_lock "$basedir")" || return $?
+
+    chmod -R +rwX "$basedir"/tmp.trash.* 2>/dev/null || true
+    rm -rf "$basedir"/tmp.trash.* 2>/dev/null || true
+}
+
+g_debug=false
+g_hostname="$(hostname 2>/dev/null || true)"
+g_user="${USER-}"
+g_workdir_var=WORKDIR
+g_id="$$"
+g_pid="$$"
+g_basedir="."
+g_workdirs_limit=65536 # default limit bounding the number of dir entries
+g_workdirs_space_limit=0 # default absolute disk limit is none
+g_workdirs_space_ratio=95% # default ratio of disk to use is 95%
+g_wsep="-"
+g_timeout=0 # no default timeout, blocking
+g_space="20G"
+g_message_interval=10
+g_workname=workdir
+
+# Options parsing
+while [ $# != 0 ]; do
+    case "$1" in
+        -p|--basedir) \
+            g_basedir="${2-}"
+            shift
+            ;;
+        -w|--basename) \
+            g_workname="${2-}"
+            shift
+            ;;
+        -n|--workdirs-limit) \
+            g_workdirs_limit="${2-}"
+            shift
+            ;;
+        -t|--timeout) \
+            g_timeout="${2-}"
+            shift
+            ;;
+        -s|--space) \
+            g_space="${2-}"
+            shift
+            ;;
+        --pid) \
+            g_pid="${2-}"
+            shift
+            ;;
+        --var) \
+            g_workdir_var="${2-}"
+            shift
+            ;;
+        --workdirs-space-limit) \
+            g_workdirs_space_limit="${2-}"
+            shift
+            ;;
+        --workdirs-space-ratio) \
+            g_workdirs_space_ratio="${2-}"
+            shift
+            ;;
+        -d|--debug) \
+            g_debug=true
+            ;;
+        -h|--help) \
+            help
+            exit 0
+            ;;
+        --version) \
+            version
+            exit 0
+            ;;
+        --message-interval) \
+            g_message_interval="${2-}"
+            shift
+            ;;
+        --) \
+            shift
+            break
+            ;;
+        -*) \
+            error "unknown option: $1"
+            ;;
+        *) \
+            break
+            ;;
+    esac
+    shift
+done
+
+[ $# -gt 0 ] || error "no action specified, must be one of: alloc|free"
+
+[ -n "$g_hostname" ] || error "can't determine hostname (hostname command failed)"
+[ -n "$g_user" ] || error "can't determine user (USER env var not specified)"
+
+[ -n "$(get_kb "$g_space")" ] || error "malformed space specification in: --space $g_space"
+g_space="$(get_kb "$g_space")"
+[ -n "$(get_int "$g_timeout")" ] || error "malformed timeout specification in: --timeout $g_timeout"
+g_timeout="$(get_int "$g_timeout")"
+[ -n "$(get_kb "$g_workdirs_space_limit")" ] || error "malformed space specification in: --workdirs-space-limit $g_workdirs_space_limit"
+g_workdirs_space_limit="$(get_kb "$g_workdirs_space_limit")"
+[ -n "$(get_ratio "$g_workdirs_space_ratio")" ] || error "malformed ratio specification in: --workdirs-space-ratio $g_workdirs_space_ratio"
+g_workdirs_space_ratio="$(get_ratio "$g_workdirs_space_ratio")"
+[ -n "$(get_int "$g_workdirs_limit")" ] || error "malformed number specification in: --workdirs-limit $g_workdirs_limit"
+g_workdirs_limit="$(get_int "$g_workdirs_limit")"
+[ "$g_workdirs_limit" -gt 0 ] || error "workdirs limit must be at least 1 in: --workdirs-limit $g_workdirs_limit"
+[ -n "$(get_int "$g_message_interval")" ] || error "malformed number in: --message-interval $g_message_interval"
+g_message_interval="$(get_int "$g_message_interval")"
+[ -n "$(get_int "$g_pid")" ] || error "malformed number in: --pid $g_pid"
+g_pid="$(get_int "$g_pid")"
+[ "$g_pid" -gt 0 ] || error "invalid pid number in: --pid $g_pid"
+[ -n "$(get_var "$g_workdir_var")" ] || error "malformed workdir env var in: --var $g_workdir_var"
+g_workdir_var="$(get_var "$g_workdir_var")"
+
+g_action="$1"
+case "$g_action" in
+    alloc) \
+        workdir_alloc
+        ;;
+    exec) \
+        shift
+        g_workdir="$(workdir_alloc)"
+        eval "export $g_workdir_var=$g_workdir"
+        exec ${1+"$@"}
+        ;;
+    clean) \
+        [ -n "${2-}" ] || error "workdirs must be specified for clean command"
+        shift
+        for i in "$@"; do
+            workdir_clean_and_free "$i"
+        done
+        ;;
+    info) \
+        [ -n "${2-}" ] || error "workdirs must be specified for info command"
+        shift
+        for i in "$@"; do
+            workdir_info "$i"
+        done
+        ;;
+    status) \
+        [ -n "${2-}" ] || error "workdirs must be specified for status command"
+        shift
+        for i in "$@"; do
+            workdir_status "$i"
+        done
+        ;;
+    list-all) \
+        workdirs_list_all "$g_basedir" "$g_workname" "$g_wsep" || true
+        ;;
+    clean-all) \
+        workdirs_clean_all_free "$g_basedir" "$g_workname" "$g_wsep" || true
+        ;;
+    *) \
+        error "invalid action: $g_action"
+        ;;
+esac
+true

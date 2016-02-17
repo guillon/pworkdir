@@ -1,0 +1,77 @@
+
+# Synopsis
+
+pworkdir is a tools which can be used for allocating a set of working
+directories given some constraints.
+
+In particular the main motivation for pworkdir is to ensure that sufficient
+disk space is available for several processes competing for some disk
+location.
+
+# Example
+
+For instance, let's say that a job, executable through a script `job.sh`,
+requires 10Gbytes of work space to execute and one wants to launch 5 of these
+jobs on the current directory. A simple way to ensure that jobs are scheduled
+such that sufficient space is available for each of them in isolation is to
+do:
+
+    $ pworkdir --space 10G exec ./job.sh &
+    $ pworkdir --space 10G exec ./job.sh &
+    $ pworkdir --space 10G exec ./job.sh &
+    $ pworkdir --space 10G exec ./job.sh &
+    $ pworkdir --space 10G exec ./job.sh &
+    $ wait
+
+Assuming for instance that only 40Gbytes of disk is available on the current
+dir, the fifth job will wait for one of the first four to complete.
+
+The output should look like:
+
+    ...
+    INFO: pworkdir: blocked, waiting for a free workdir since 11 secs
+    (timeout=0): workdirs space limit reached (used=40G, requested=10G,
+    available=40G, basedir=.)
+    ...
+    [1]   Done                  ./pworkdir --space 10G ./job.sh
+    [2]   Done                  ./pworkdir --space 10G ./job.sh
+    [3]   Done                  ./pworkdir --space 10G ./job.sh
+    [4]   Done                  ./pworkdir --space 10G ./job.sh
+    ... once one of the first four has finished, the fifth can start
+    ...
+    [5]   Done                  ./pworkdir --space 10G ./job.sh
+    ...
+
+# Download
+
+Download the pworkdir tool from the releases page:
+https://github.com/guillon/pworkdir/releases
+
+Or download the last stable version of the script from there:
+https://raw.githubusercontent.com/guillon/pworkdir/master/pworkdir
+
+For instance:
+
+    $ wget -O ~/bin/pworkdir https://raw.githubusercontent.com/guillon/pworkdir/master/pworkdir
+    $ chmod +x ~/bin/pworkdir
+
+
+# References
+
+Refer to the project home page at:
+http://guillon.github.com/pworkdir
+
+Fill issues and enhancement request at:
+https://github.com/guillon/pworkdir/issues
+
+Refer to the current build and validation status at:
+https://travis-ci.org/guillon/pworkdir?branches
+
+
+# License
+
+The tool is distributed under the GPLv2 license.
+
+Refer to the COPYING file: https://github.com/guillon/pworkdir/blob/master/COPYING
+
+Refer to the COPYRIGHT file: https://github.com/guillon/pworkdir/blob/master/COPYRIGHT
