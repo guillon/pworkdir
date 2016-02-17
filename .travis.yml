@@ -1,8 +1,6 @@
 language: bash
 script:
-  - make all
-  - make V=1 DEBUGTEST=1 check
-  - make install PREFIX=$PWD/install
+  - make all && make V=1 DEBUGTEST=1 check && make install PREFIX=$PWD/install
 deploy:
   provider: releases
   api_key:
