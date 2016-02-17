@@ -112,14 +112,15 @@ function get_basedir()
 {
     local basedir="${1?}"
     mkdir -p "$basedir" || error "can't create base dir: $basedir"
-    chmod 700 "$basedir" || error "can't chmod base dir: $basedir"
     echo "$(readlink -e "$basedir")"
 }
 
 function get_basedir_lock()
 {
     local basedir="${1?}"
-    echo "$(get_basedir "$basedir")/pworkdir.lock"
+    local lock="$(get_basedir "$basedir")/pworkdir.lock"
+    touch "$lock" || error "can't create lock file: $lock"
+    echo "$lock"
 }
 
 function workdir_clean()
