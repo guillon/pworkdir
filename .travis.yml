@@ -1,0 +1,13 @@
+language: bash
+script:
+  - make all
+  - make V=1 DEBUGTEST=1 check
+  - make install PREFIX=$PWD/install
+deploy:
+  provider: releases
+  api_key:
+    secure: DgtjWL/hEnI6aEO8wAGSQL033YtqpfTDCWdq8fGSWd/5PCauhxzaDmtR+1QoSf0Fg5fQTGtbwaNCwF3pn5g+Mi0CSInLEuZPai8VOiFN8r8FSh5jKdYXxoJpEeErfKARhcxb5qdHfKP6rl0gWvzfZh6gJ1qmiVVqs8RXDrKflc5cPjZdOJmv/nmDa3gsxsbuTZXLNzo49makJWGCWTyNwBTC17tyOsRiXeNYCMYwwGVfEKoWxZ5e9IYWZusm2YRcpsoRUYbIwDmZz9JIBCy8EpNADF9VNGjwC2sFfWNiLtsMO8skczQx2s1YA3hjKmXHTBP5Wghw3udPUYB6sa3aoJR9oteGoPAVIzad8oJEma7Bp+TE9SbqvmboSqVG+W5gvnBs05CsS9HEknScMUBUNTB7L/6s2JcQEN7sv1hDJc+jd03OpOEVqVfEdHV/8x7FqwZalqIMyycs6WjxG/Pj0pEIuD6KcUxLgJ3hqSbmFbRbNRMSMEjSFR6m8USRAZ0b6L4aaDBtSp5ebAAqGQ8jgL9sMLDwTtNxVLYhMyojv7llbkL8rwotfTY8JliBeKxdsd27bX7SktWUdbmolR1r4mCvdrkFSOzM1XrRYobJ9R1k1UlJ7CJhMwpslzaNUs4zYpbI3pdTGWYezHnz5W3gWb3rB5Mzv8C3BO1rz8SZ9ug=
+  file: install/bin/pworkdir
+  on:
+    repo: guillon/pworkdir
+    tags: true

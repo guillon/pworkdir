@@ -1,4 +1,6 @@
 
+[![Build Status](https://api.travis-ci.org/guillon/pworkdir.png?branch=master)](https://travis-ci.org/guillon/pworkdir/branches)
+
 # Synopsis
 
 pworkdir is a tools which can be used for allocating a set of working
