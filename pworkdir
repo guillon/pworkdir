@@ -53,7 +53,7 @@ function version() {
 
 function error() { echo "ERROR: $g_basename: $1" >&2; exit 1; }
 function warning() { echo "WARNING: $g_basename: $1" >&2; }
-function debug() { [ "$g_debug" = true ] || return 0; echo "DEBUG: $g_basename: $1" >&2; }
+function debug() { [ "$g_debug" = true ] || return 0; echo "DEBUG: $g_basename: $$: $1" >&2; }
 function info() { echo "INFO: $g_basename: $1" >&2; }
 
 function get_int()
@@ -436,7 +436,7 @@ while [ $# != 0 ]; do
     shift
 done
 
-[ $# -gt 0 ] || error "no action specified, must be one of: alloc|free"
+[ $# -gt 0 ] || error "missing argument, no action specified"
 
 [ -n "$g_hostname" ] || error "can't determine hostname (hostname command failed)"
 [ -n "$g_user" ] || error "can't determine user (USER env var not specified)"
