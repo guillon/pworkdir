@@ -329,6 +329,7 @@ function workdirs_clean_all_free()
     local wsep="${3?}"
     basedir="$(get_basedir "$basedir")"
     local trashdir="$(mktemp -d -p "$basedir" tmp.trash.XXXXXX)"
+    local res=0
 
     debug "cleaning free workdirs in: $basedir"
     (flock 10
@@ -347,10 +348,12 @@ function workdirs_clean_all_free()
             clean_code=0
         done || true
         exit $clean_code
-    ) 10>"$(get_basedir_lock "$basedir")" || return $?
+    ) 10>"$(get_basedir_lock "$basedir")" || res=$?
 
     chmod -R +rwX "$basedir"/tmp.trash.* 2>/dev/null || true
     rm -rf "$basedir"/tmp.trash.* 2>/dev/null || true
+
+    return $res
 }
 
 g_debug=false
