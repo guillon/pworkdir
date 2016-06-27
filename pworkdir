@@ -26,9 +26,9 @@ g_dirname="$(dirname "$0")"
 
 function help() {
     cat <<EOF
-usage: $g_basename exec <cmd...>
-    or $g_basename alloc
-       $g_basename free <workdirs>...
+usage: $g_basename [options] exec <cmd...>
+    or $g_basename [options] alloc
+       $g_basename [options] clean <workdirs>...
     or $g_basename status|info <workdirs>...
     or $g_basename list-all|clean-all
 
@@ -37,12 +37,38 @@ exports the allocated pathname in the WORKDIR env. var. and executes
 the given <cmd ...>.
 
 In the second form, with alloc command, allocates the workdir and
-outputs the pathname to stdout. With free command, free and clean the
-previously allocated workdir.
+outputs the pathname to stdout. With clean command, cleans and frees
+the previously allocated workdir.
 
 The other forms can be used to get status and information on previously
 allocated workdirs.
 
+Options are:
+  -p|--basedir    base directory under which workdir will be created.
+                  Default: $g_default_basedir
+  -w|--basename   base name of the working directory.
+                  Default: $g_default_workname
+  -n|--workdirs-limit maximum number of workdirs for the basedir
+                  Default: $g_default_workdirs_limit
+  -t|--timeout    timeout in secs for the allocation of a new workdir, 0 for none
+                  Default: $g_default_timeout
+  -s|--space      requested space for the new workdir
+                  Default: $g_default_space
+  --pid           pid to attach this workdir to, use caller pid for instance with --pid \$$
+                  Default: $g_default_pid
+  --var           workdir env. var. for exec command
+                  Default: $g_default_workdir_var
+  --workdirs-space-limit global limit for the basedir on the used space across all workdirs
+                  0 for none
+                  Default: $g_default_workdirs_space_limit
+  --workdirs-space-ratio global limit as a ratio of disk size
+                  0 for none
+                  Default: $g_default_workdirs_space_ratio
+  --message-interval output message interval in secs, when blocked for allocation
+                  Default: $g_default_message_interval
+  -d|--debug      output debug messaages
+  -h|--help       this help screen
+  --version       output version information
 EOF
 }
 
@@ -54,6 +80,7 @@ function version() {
 function error() { echo "ERROR: $g_basename: $1" >&2; exit 1; }
 function warning() { echo "WARNING: $g_basename: $1" >&2; }
 function debug() { [ "$g_debug" = true ] || return 0; echo "DEBUG: $g_basename: $$: $1" >&2; }
+function debug_exec() { [ "$g_debug" = true ] || return 0; "$@" 2>&1 | sed "s/^/DEBUG: $g_basename: $$: /" >&2; }
 function info() { echo "INFO: $g_basename: $1" >&2; }
 
 function get_int()
@@ -211,17 +238,55 @@ function workdir_status()
     ) 10>"$(get_basedir_lock "$basedir")"
 }
 
+function basedir_disk_size()
+{
+    local basedir="${1?}"
+    local disk_size="$(df -k "$basedir" | tail -1 | tr '\t' ' ' | sed 's/  */,/g' | cut -f2 -d, || true)"
+    [ -n "$disk_size" -a "$disk_size" -gt 0 ] || error "can't determine disk size for $basedir"
+    echo "$disk_size"
+}
+
+function basedir_size_limit()
+{
+    local basedir="${1?}"
+    echo "$g_workdirs_space_limit"
+}
+
+function basedir_size_ratio_limit()
+{
+    local basedir="${1?}"
+
+    if [ "$g_workdirs_space_ratio" -gt 0 ]; then
+        local disk_size
+        local limit
+        disk_size="$(basedir_disk_size "$basedir")"
+        limit="$((disk_size * g_workdirs_space_ratio / 100))"
+        echo "$limit"
+    else
+        echo "0"
+    fi
+}
+
 function basedir_space()
 {
     local basedir="${1?}"
-    if [ "$g_workdirs_space_limit" -gt 0 ]; then
-        echo "$g_workdirs_space_limit"
-    else
-        local space="$(df -k "$basedir" | tail -1 | tr '\t' ' ' | sed 's/  */,/g' | cut -f2 -d, || true)"
-        [ -n "$space" ] || error "can't determine disk size for $basedir"
-        [ "$g_workdirs_space_ratio" -le 0 ] || space="$((space * g_workdirs_space_ratio / 100))"
-        echo "$space"
-    fi
+    local space_abs_limit=0
+    local space_ratio_limit=0
+    local space="$(basedir_disk_size "$basedir")"
+    limit="$(basedir_size_limit "$basedir")"
+    [ "$limit" = 0 -o "$space" -le "$limit" ] || space="$limit"
+    limit="$(basedir_size_ratio_limit "$basedir")"
+    [ "$limit" = 0 -o "$space" -le "$limit" ] || space="$limit"
+    echo "$space"
+}
+
+function dump_basedir_info()
+{
+    local basedir="${1?}"
+    echo "Basedir: $basedir"
+    echo "Disk Size: $(basedir_disk_size "$basedir")"
+    echo "Absolute Size Limit: $(basedir_size_limit "$basedir")"
+    echo "Relative Size Limit: $(basedir_size_ratio_limit "$basedir")"
 }
 
 function workdir_try_alloc()
@@ -279,9 +344,12 @@ function workdir_alloc()
     local res
     local workdir
     local basedir
+    local tries
+
     basedir="$(get_basedir "$g_basedir")"
     start="$(date +%s)"
     last="$start"
+    tries=0
     while true; do
         res=0
         workdir="$(workdir_try_alloc "$g_basedir" "$g_workname" "$g_wsep" "$g_id" "$g_hostname" "$g_user" "$g_pid" "$g_space" "$g_workdirs_limit")" || res=$?
@@ -299,11 +367,12 @@ function workdir_alloc()
                 [ "$g_timeout" -gt 0 -a "$delay" -gt "$g_timeout" ] && \
                     error "could not allocate workdir after $delay secs (timeout=$g_timeout, basedir=$basedir): $cause" || true
                 interval=$(($(date +%s) - last))
-                [ "$interval" -gt "$g_message_interval" ] && \
+                [ "$tries" = 0 -o "$interval" -gt "$g_message_interval" ] && \
                     info "blocked, waiting for a free workdir since $delay secs (timeout=$g_timeout, basedir=$basedir): $cause" && \
                     last="$(date +%s)" || true
                 workdirs_clean_all_free "$g_basedir" "$g_workname" "$g_wsep" || \
                     sleep 1
+                tries="$(($tries + 1))"
                 continue
             else
                 error "could not allocate workdir: internal error (timeout=$g_timeout, limit=$g_workdirs_limit, basedir=$basedir)"
@@ -356,21 +425,32 @@ function workdirs_clean_all_free()
     return $res
 }
 
+g_default_workdir_var=WORKDIR            # default workdir env. var.
+g_default_basedir=.                      # default workdirs base directory
+g_default_workdirs_limit=65536           # default limit bounding the number of dir entries
+g_default_workdirs_space_limit=200G      # default global used space upper bound
+g_default_workdirs_space_ratio=90%       # default used space ratio upper bound
+g_default_timeout=0                      # default timeout in secs
+g_default_space=20G                      # default allocation space request
+g_default_message_interval=10            # default wait message interval on allocation
+g_default_workname=workdir               # default workdir basename
+g_default_pid=$$                         # default allocation pid
+
 g_debug=false
 g_hostname="$(hostname 2>/dev/null || true)"
 g_user="${USER-}"
-g_workdir_var=WORKDIR
+g_workdir_var="$g_default_workdir_var"
 g_id="$$"
-g_pid="$$"
-g_basedir="."
-g_workdirs_limit=65536 # default limit bounding the number of dir entries
-g_workdirs_space_limit=0 # default absolute disk limit is none
-g_workdirs_space_ratio=95% # default ratio of disk to use is 95%
+g_pid="$g_default_pid"
+g_basedir="$g_default_basedir"
+g_workdirs_limit="$g_default_workdirs_limit"
+g_workdirs_space_limit="$g_default_workdirs_space_limit"
+g_workdirs_space_ratio="$g_default_workdirs_space_ratio"
 g_wsep="-"
-g_timeout=0 # no default timeout, blocking
-g_space="20G"
-g_message_interval=10
-g_workname=workdir
+g_timeout="$g_default_timeout"
+g_space="$g_default_space"
+g_message_interval="$g_default_message_interval"
+g_workname="$g_default_workname"
 
 # Options parsing
 while [ $# != 0 ]; do
@@ -411,6 +491,10 @@ while [ $# != 0 ]; do
             g_workdirs_space_ratio="${2-}"
             shift
             ;;
+        --message-interval) \
+            g_message_interval="${2-}"
+            shift
+            ;;
         -d|--debug) \
             g_debug=true
             ;;
@@ -421,10 +505,6 @@ while [ $# != 0 ]; do
         --version) \
             version
             exit 0
-            ;;
-        --message-interval) \
-            g_message_interval="${2-}"
-            shift
             ;;
         --) \
             shift
@@ -463,6 +543,8 @@ g_pid="$(get_int "$g_pid")"
 [ "$g_pid" -gt 0 ] || error "invalid pid number in: --pid $g_pid"
 [ -n "$(get_var "$g_workdir_var")" ] || error "malformed workdir env var in: --var $g_workdir_var"
 g_workdir_var="$(get_var "$g_workdir_var")"
+
+debug_exec dump_basedir_info "$g_basedir"
 
 g_action="$1"
 case "$g_action" in
