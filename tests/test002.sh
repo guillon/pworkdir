@@ -30,6 +30,4 @@ count=$(grep ": allocated:" log | grep -v '^+' | wc -l || true)
 [ "$count" = 60 ]
 count=$(grep ": allocated: failed" log | grep -v '^+' | wc -l || true)
 [ "$count" = 54 ]
-count=$(grep "waiting for a free" log | grep -v '^+' | wc -l || true)
-[ "$count" -ge 1 ]
 

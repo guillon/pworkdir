@@ -28,6 +28,3 @@ env SHELL="$(which bash)" PWORKDIR="$PWORKDIR" parallel -j 20 -u 'echo {}: runni
 
 count=$(grep ": running: DONE" log | grep -v '^+' | wc -l || true)
 [ "$count" = 20 ]
-count=$(grep "waiting for a free" log | grep -v '^+' | wc -l || true)
-[ "$count" -ge 1 ]
-
