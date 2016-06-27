@@ -21,8 +21,10 @@ source `dirname $0`/common.sh
 
 TEST_CASE="pworkdir: parallel creation of workdirs"
 
-rm -rf workdir-*
-env SHELL="$(which bash)" PWORKDIR="$PWORKDIR" parallel -j 60 -u 'echo {}: allocated: $("$PWORKDIR" --pid '$$' -t 5 -n 6 -s 0 --message-interval 1 alloc || echo failed)' ::: $(seq 1 60) 2>&1 | tee -a log
+# Force global dir to be local
+PWORKDIR="$PWORKDIR --workdirs-basedir $PWD"
+
+env SHELL="$(which bash)" PWORKDIR="$PWORKDIR" parallel -j 60 -u 'echo {}: allocated: $($PWORKDIR --pid '$$' -t 5 --workdirs-limit 6 -s 0 --message-interval 1 alloc || echo failed)' ::: $(seq 1 60) 2>&1 | tee -a log
 
 count=$(grep ": allocated:" log | grep -v '^+' | wc -l || true)
 [ "$count" = 60 ]

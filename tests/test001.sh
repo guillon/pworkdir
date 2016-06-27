@@ -21,14 +21,16 @@ source `dirname $0`/common.sh
 
 TEST_CASE="pworkdir: sequential creation of workdirs"
 
+# Force global dir to be local
+PWORKDIR="$PWORKDIR --workdirs-basedir $PWD"
+
 echo "Allocating workdirs for pid: $$"
-rm -rf workdir-*
 for i in $(seq 1 12); do
-    workdir=$("$PWORKDIR" -d --pid $$ --timeout 3 --workdirs-limit 6 --space 0 --message-interval 1 alloc) || break
+    workdir=$($PWORKDIR -d --pid $$ --timeout 3 --workdirs-limit 6 --space 0 --message-interval 1 alloc) || break
     echo "$i: allocated: $workdir"
 done 2>&1 | tee -a log
 
-"$PWORKDIR" list-all | xargs "$PWORKDIR" info
+$PWORKDIR list-all | xargs $PWORKDIR info
 
 count=$(grep ": allocated:" log | grep -v '^+' | wc -l || true)
 [ "$count" = 6 ]

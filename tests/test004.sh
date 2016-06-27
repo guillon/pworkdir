@@ -21,12 +21,15 @@ source `dirname $0`/common.sh
 
 TEST_CASE="pworkdir: parallel creation of workdirs with relative space constraint"
 
+# Force global dir to be local
+PWORKDIR="$PWORKDIR --workdirs-basedir $PWD"
+
 # Compute 10% of free space and arrange to have at most 6 workdirs in the limit
 free_space="$(df -k "." | tail -1 | tr '\t' ' ' | sed 's/  */,/g' | cut -f2 -d, || true)"
 allowed_space=$((free_space / 10))
 workdir_space=$((allowed_space / 6))
 
-env env SHELL="$(which bash)" PWORKDIR="$PWORKDIR" parallel -j 20 -u 'echo {}: allocated: $("$PWORKDIR" --pid '$$' -t 5 --workdirs-space-ratio 10% --space '"$workdir_space"' --message-interval 1 alloc || echo failed)' ::: $(seq 1 20) 2>&1 | tee -a log
+env env SHELL="$(which bash)" PWORKDIR="$PWORKDIR" parallel -j 20 -u 'echo {}: allocated: $($PWORKDIR --pid '$$' -t 5 --workdirs-space-ratio 10% --space '"$workdir_space"' --message-interval 1 alloc || echo failed)' ::: $(seq 1 20) 2>&1 | tee -a log
 
 count=$(grep -c ": allocated:" log | grep -v '^+' || true)
 [ "$count" = 20 ]

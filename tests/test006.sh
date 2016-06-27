@@ -21,7 +21,7 @@ source `dirname $0`/common.sh
 
 TEST_CASE="pworkdir: basic options checks"
 
-version_str=$("$PWORKDIR" --version)
+version_str=$($PWORKDIR --version)
 name=$(echo "$version_str" | cut -f1 -d' ')
 version=$(echo "$version_str" | cut -f2 -d' ')
 vers=$(echo "$version_str" | cut -f3 -d' ')
@@ -34,5 +34,5 @@ wc=$(echo "$version_str" | wc -w)
 [ "$version" = version ]
 [ "$vers" = "$maj"."$min"."$patch" ]
 
-help=$("$PWORKDIR" --help | head -1)
+help=$($PWORKDIR --help | head -1)
 echo "$help" | grep -i "usage:"
