@@ -19,7 +19,7 @@
 
 set -euo pipefail
 
-VERSION="0.1.4"
+VERSION="0.1.5"
 
 g_basename="$(basename "$0")"
 g_dirname="$(dirname "$0")"
