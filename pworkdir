@@ -79,6 +79,7 @@ function version() {
     echo "$g_basename version $VERSION [sha1:$sha1]"
 }
 
+function Q() { local s=""; while [ $# -gt 0 ]; do printf "%s%q" "$s" "$1"; s=" "; shift; done; }
 function error() { echo "ERROR: $g_basename: $1" >&2; exit 1; }
 function warning() { echo "WARNING: $g_basename: $1" >&2; }
 function debug() { [ "$g_debug" = true ] || return 0; echo "DEBUG: $g_basename: $$: $1" >&2; }
@@ -594,7 +595,7 @@ case "$g_action" in
     exec) \
         shift
         g_workdir="$(workdir_alloc)"
-        eval "export $g_workdir_var=$g_workdir"
+        eval export $(Q "$g_workdir_var=$g_workdir")
         exec ${1+"$@"}
         ;;
     clean) \
